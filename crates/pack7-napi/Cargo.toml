@@ -1,0 +1,15 @@
+[package]
+name = "pack7-napi"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pack7-core = { path = "../pack7-core" }
+napi = { version = "3", features = ["napi8"] }
+napi-derive = "3"
+
+[build-dependencies]
+napi-build = "2"

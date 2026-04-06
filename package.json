@@ -1,0 +1,18 @@
+{
+  "private": true,
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "build:napi": "cd packages/pack7 && napi build --release --platform --manifest-path ../../crates/pack7-napi/Cargo.toml -o artifacts",
+    "build:wasm": "wasm-pack build crates/pack7-wasm --target nodejs --release --out-dir ../../packages/pack7/wasm && rm -f packages/pack7/wasm/.gitignore",
+    "build:ts": "pnpm -r run build",
+    "build": "pnpm run build:napi && pnpm run build:wasm && pnpm run build:ts",
+    "lint": "oxlint packages/pack7/src/ && cargo clippy --workspace",
+    "fmt": "cargo fmt --all",
+    "test": "bun test packages/pack7/test/",
+    "bench": "node --expose-gc packages/pack7/bench/index.mjs"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3",
+    "oxlint": "^1.58.0"
+  }
+}

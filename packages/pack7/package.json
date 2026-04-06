@@ -1,0 +1,46 @@
+{
+  "name": "@9x/pack7",
+  "version": "0.0.0",
+  "description": "7-bit ASCII packing - pack ASCII into 87.5% of its original size",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "wasm", "WIRE.md"],
+  "napi": {
+    "binaryName": "pack7",
+    "targets": [
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu",
+      "aarch64-unknown-linux-musl",
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-pc-windows-msvc"
+    ]
+  },
+  "scripts": {
+    "build": "tsc",
+    "version": "napi version",
+    "prepublishOnly": "napi prepublish -t npm"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  },
+  "optionalDependencies": {
+    "@9x/pack7-linux-x64-gnu": "0.0.0",
+    "@9x/pack7-linux-arm64-gnu": "0.0.0",
+    "@9x/pack7-linux-arm64-musl": "0.0.0",
+    "@9x/pack7-darwin-arm64": "0.0.0",
+    "@9x/pack7-darwin-x64": "0.0.0",
+    "@9x/pack7-win32-x64-msvc": "0.0.0"
+  }
+}

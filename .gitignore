@@ -1,0 +1,8 @@
+target/
+node_modules/
+*.node
+dist/
+packages/pack7/npm/
+packages/pack7/artifacts/
+packages/pack7/wasm/
+bench-results.json

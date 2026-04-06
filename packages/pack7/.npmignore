@@ -1,0 +1,6 @@
+src/
+test/
+bench/
+artifacts/
+tsconfig.json
+*.node

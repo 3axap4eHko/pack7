@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            cross: true
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: true
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    name: Build - ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: corepack enable && pnpm install
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install Zig
+        if: matrix.cross
+        run: |
+          curl -L https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz | tar -xJ
+          echo "$PWD/zig-x86_64-linux-0.15.2" >> $GITHUB_PATH
+      - run: cd packages/pack7 && ./node_modules/.bin/napi build --release --platform --target ${{ matrix.target }} --manifest-path ../../crates/pack7-napi/Cargo.toml -o artifacts ${{ matrix.cross && '--cross-compile' || '' }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bindings-${{ matrix.target }}
+          path: packages/pack7/artifacts/
+          if-no-files-found: error
+
+  test:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    name: Test - ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+      - run: corepack enable && pnpm install
+      - uses: actions/download-artifact@v8
+        with:
+          name: bindings-${{ matrix.target }}
+          path: artifacts/
+      - run: cp artifacts/*.node crates/pack7-napi/pack7.node
+      - run: pnpm -w run build:wasm
+      - run: cd packages/pack7 && pnpm build
+      - run: bun test packages/pack7/test/
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: corepack enable && pnpm install
+      - run: cd packages/pack7 && ./node_modules/.bin/napi create-npm-dirs
+      - uses: actions/download-artifact@v8
+        with:
+          path: packages/pack7/artifacts/
+          merge-multiple: true
+      - run: cd packages/pack7 && ./node_modules/.bin/napi artifacts -d artifacts
+      - run: pnpm -w run build:wasm
+      - run: cd packages/pack7 && pnpm build
+      - name: Create GitHub Release
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish to npm
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          TAG=${{ contains(github.ref_name, '-') && 'next' || 'latest' }}
+          cd packages/pack7
+          node -e "const p=require('./package.json'); p.version='${VERSION}'; require('fs').writeFileSync('package.json', JSON.stringify(p,null,2)+'\n')"
+          ./node_modules/.bin/napi pre-publish -t npm --skip-gh-release
+          for dir in npm/*/; do
+            (cd "$dir" && npm publish --access public --tag "$TAG" --provenance)
+          done
+          npm publish --access public --tag "$TAG" --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
