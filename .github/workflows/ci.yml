@@ -137,10 +137,10 @@ jobs:
           TAG=${{ contains(github.ref_name, '-') && 'next' || 'latest' }}
           cd packages/pack7
           node -e "const p=require('./package.json'); p.version='${VERSION}'; require('fs').writeFileSync('package.json', JSON.stringify(p,null,2)+'\n')"
-          ./node_modules/.bin/napi pre-publish -t npm --skip-gh-release
+          ./node_modules/.bin/napi pre-publish -t npm --gh-release --skip-optional-publish
           for dir in npm/*/; do
             (cd "$dir" && npm publish --access public --tag "$TAG" --provenance)
           done
           npm publish --access public --tag "$TAG" --provenance
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
