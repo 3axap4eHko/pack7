@@ -2,7 +2,26 @@
   "name": "@9x/pack7",
   "version": "0.0.0",
   "description": "7-bit ASCII packing - pack ASCII into 87.5% of its original size",
+  "keywords": [
+    "ascii",
+    "pack",
+    "7bit",
+    "binary",
+    "encoding",
+    "zero-alloc",
+    "napi",
+    "wasm",
+    "gsm"
+  ],
   "license": "MIT",
+  "author": "Ivan Zakharchanka <3axap4eHko@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/3axap4eHko/pack7.git",
+    "directory": "packages/pack7"
+  },
+  "homepage": "https://github.com/3axap4eHko/pack7/tree/master/packages/pack7",
+  "bugs": "https://github.com/3axap4eHko/pack7/issues",
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.js",
@@ -13,7 +32,11 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist", "wasm", "WIRE.md"],
+  "files": [
+    "dist",
+    "wasm",
+    "WIRE.md"
+  ],
   "napi": {
     "binaryName": "pack7",
     "targets": [
@@ -34,5 +57,13 @@
     "@napi-rs/cli": "^3",
     "@types/node": "^22.0.0",
     "typescript": "^5.7.0"
+  },
+  "optionalDependencies": {
+    "@9x/pack7-linux-x64-gnu": "0.0.0",
+    "@9x/pack7-linux-arm64-gnu": "0.0.0",
+    "@9x/pack7-linux-arm64-musl": "0.0.0",
+    "@9x/pack7-darwin-x64": "0.0.0",
+    "@9x/pack7-darwin-arm64": "0.0.0",
+    "@9x/pack7-win32-x64-msvc": "0.0.0"
   }
 }
