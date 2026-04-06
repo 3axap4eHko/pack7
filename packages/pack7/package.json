@@ -34,13 +34,5 @@
     "@napi-rs/cli": "^3",
     "@types/node": "^22.0.0",
     "typescript": "^5.7.0"
-  },
-  "optionalDependencies": {
-    "@9x/pack7-linux-x64-gnu": "0.0.0",
-    "@9x/pack7-linux-arm64-gnu": "0.0.0",
-    "@9x/pack7-linux-arm64-musl": "0.0.0",
-    "@9x/pack7-darwin-arm64": "0.0.0",
-    "@9x/pack7-darwin-x64": "0.0.0",
-    "@9x/pack7-win32-x64-msvc": "0.0.0"
   }
 }
