@@ -1,13 +1,20 @@
 export const backendName = "js" as const;
 
 export function packedSize(inputLen: number): number {
-  return (inputLen * 7 + 7) >> 3;
+  return Math.ceil(inputLen * 7 / 8);
 }
 
 export function packInto(
   src: Uint8Array, srcOffset: number, srcLength: number,
   dst: Uint8Array, dstOffset: number,
 ): number {
+  if (srcOffset + srcLength > src.length) {
+    throw new RangeError(`source range [${srcOffset}..${srcOffset + srcLength}) exceeds length ${src.length}`);
+  }
+  const outLen = packedSize(srcLength);
+  if (dstOffset + outLen > dst.length) {
+    throw new RangeError(`destination range [${dstOffset}..${dstOffset + outLen}) exceeds length ${dst.length}`);
+  }
   const chunks = (srcLength / 8) | 0;
   const remainder = srcLength % 8;
   const dstDV = new DataView(dst.buffer, dst.byteOffset, dst.byteLength);
@@ -72,6 +79,13 @@ export function unpackInto(
   dst: Uint8Array, dstOffset: number,
   originalLength: number,
 ): void {
+  const packedLen = packedSize(originalLength);
+  if (srcOffset + packedLen > src.length) {
+    throw new RangeError(`source range [${srcOffset}..${srcOffset + packedLen}) exceeds length ${src.length}`);
+  }
+  if (dstOffset + originalLength > dst.length) {
+    throw new RangeError(`destination range [${dstOffset}..${dstOffset + originalLength}) exceeds length ${dst.length}`);
+  }
   const fullBlocks = (originalLength / 8) | 0;
   const remainder = originalLength % 8;
   const srcDV = new DataView(src.buffer, src.byteOffset, src.byteLength);

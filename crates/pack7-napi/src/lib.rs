@@ -29,9 +29,29 @@ pub fn pack_into(
     let src_off = src_offset as usize;
     let src_len = src_length as usize;
     let dst_off = dst_offset as usize;
-    pack7_core::pack7_into(&src[src_off..src_off + src_len], &mut dst[dst_off..])
-        .map(|n| n as u32)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))
+    let out_len = pack7_core::packed_size(src_len);
+    if src_off + src_len > src.len() {
+        return Err(napi::Error::from_reason(format!(
+            "source range [{}..{}) exceeds length {}",
+            src_off,
+            src_off + src_len,
+            src.len()
+        )));
+    }
+    if dst_off + out_len > dst.len() {
+        return Err(napi::Error::from_reason(format!(
+            "destination range [{}..{}) exceeds length {}",
+            dst_off,
+            dst_off + out_len,
+            dst.len()
+        )));
+    }
+    pack7_core::pack7_into(
+        &src[src_off..src_off + src_len],
+        &mut dst[dst_off..dst_off + out_len],
+    )
+    .map(|n| n as u32)
+    .map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 #[napi]
@@ -41,14 +61,31 @@ pub fn unpack_into(
     mut dst: Buffer,
     dst_offset: u32,
     original_length: u32,
-) {
+) -> Result<()> {
     let src_off = src_offset as usize;
     let dst_off = dst_offset as usize;
     let orig_len = original_length as usize;
     let packed_len = pack7_core::packed_size(orig_len);
+    if src_off + packed_len > src.len() {
+        return Err(napi::Error::from_reason(format!(
+            "source range [{}..{}) exceeds length {}",
+            src_off,
+            src_off + packed_len,
+            src.len()
+        )));
+    }
+    if dst_off + orig_len > dst.len() {
+        return Err(napi::Error::from_reason(format!(
+            "destination range [{}..{}) exceeds length {}",
+            dst_off,
+            dst_off + orig_len,
+            dst.len()
+        )));
+    }
     pack7_core::unpack7_into(
         &src[src_off..src_off + packed_len],
         orig_len,
         &mut dst[dst_off..dst_off + orig_len],
     );
+    Ok(())
 }
