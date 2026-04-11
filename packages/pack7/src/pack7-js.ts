@@ -137,12 +137,21 @@ export function unpack7(input: Uint8Array, originalLength: number): Uint8Array {
   return output;
 }
 
+function regionsOverlap(aOff: number, aLen: number, bOff: number, bLen: number): boolean {
+  return aOff < bOff + bLen && bOff < aOff + aLen;
+}
+
 export function packSAB(
   sab: SharedArrayBuffer,
   srcOffset: number, srcLength: number,
   dstOffset: number,
 ): number {
   const view = new Uint8Array(sab);
+  const outLen = packedSize(srcLength);
+  if (regionsOverlap(srcOffset, srcLength, dstOffset, outLen)) {
+    const srcCopy = new Uint8Array(view.subarray(srcOffset, srcOffset + srcLength));
+    return packInto(srcCopy, 0, srcLength, view, dstOffset);
+  }
   return packInto(view, srcOffset, srcLength, view, dstOffset);
 }
 
@@ -153,6 +162,12 @@ export function unpackSAB(
   originalLength: number,
 ): void {
   const view = new Uint8Array(sab);
+  const pLen = packedSize(originalLength);
+  if (regionsOverlap(srcOffset, pLen, dstOffset, originalLength)) {
+    const srcCopy = new Uint8Array(view.subarray(srcOffset, srcOffset + pLen));
+    unpackInto(srcCopy, 0, view, dstOffset, originalLength);
+    return;
+  }
   unpackInto(view, srcOffset, view, dstOffset, originalLength);
 }
 
@@ -167,6 +182,10 @@ export function createPacker(maxSize: number) {
       return packInto(inputBuffer, 0, length, outputBuffer, 0);
     },
     unpack(packedLength: number, originalLength: number): void {
+      const expected = packedSize(originalLength);
+      if (packedLength < expected) {
+        throw new RangeError(`packed length ${packedLength} too short for ${originalLength} bytes (need ${expected})`);
+      }
       unpackInto(outputBuffer, 0, inputBuffer, 0, originalLength);
     },
     free() {},

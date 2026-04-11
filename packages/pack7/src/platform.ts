@@ -87,6 +87,10 @@ function tryNative(): BackendModule | null {
           return addon.packInto(inputBuffer, 0, length, outputBuffer, 0);
         },
         unpack(packedLength, originalLength) {
+          const expected = addon.packedSize(originalLength);
+          if (packedLength < expected) {
+            throw new RangeError(`packed length ${packedLength} too short for ${originalLength} bytes (need ${expected})`);
+          }
           addon.unpackInto(outputBuffer, 0, inputBuffer, 0, originalLength);
         },
         free() {},
@@ -180,6 +184,10 @@ function tryWasm(): BackendModule | null {
           return written;
         },
         unpack(packedLength, originalLength) {
+          const expected = (wasm.packed_size(originalLength)) >>> 0;
+          if (packedLength < expected) {
+            throw new RangeError(`packed length ${packedLength} too short for ${originalLength} bytes (need ${expected})`);
+          }
           wasm.unpack7(outPtr, packedLength, originalLength, inPtr, maxSize);
         },
         free() {
