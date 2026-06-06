@@ -15,5 +15,5 @@
     "@napi-rs/cli": "3.6.0",
     "oxlint": "1.58.0"
   },
-  "version": "0.0.1-rc.1"
+  "version": "0.0.1-rc.2"
 }
