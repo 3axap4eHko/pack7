@@ -9,17 +9,29 @@ export interface Packer {
 export interface BackendModule {
   backendName: "native" | "wasm" | "js";
   packedSize(inputLen: number): number;
+  validateAscii(input: Uint8Array | Buffer, inputOffset?: number, inputLength?: number): boolean;
   pack7(input: Uint8Array | Buffer): Uint8Array;
+  pack7Safe(input: Uint8Array | Buffer): Uint8Array | undefined;
   unpack7(input: Uint8Array, originalLength: number): Uint8Array;
+  unpack7Safe(input: Uint8Array, originalLength: number): Uint8Array | undefined;
   packInto(
     src: Uint8Array, srcOffset: number, srcLength: number,
     dst: Uint8Array, dstOffset: number,
   ): number;
+  packIntoSafe(
+    src: Uint8Array, srcOffset: number, srcLength: number,
+    dst: Uint8Array, dstOffset: number,
+  ): number | undefined;
   unpackInto(
     src: Uint8Array, srcOffset: number,
     dst: Uint8Array, dstOffset: number,
     originalLength: number,
   ): void;
+  unpackIntoSafe(
+    src: Uint8Array, srcOffset: number,
+    dst: Uint8Array, dstOffset: number,
+    originalLength: number,
+  ): number | undefined;
   packSAB(
     sab: SharedArrayBuffer,
     srcOffset: number, srcLength: number,

@@ -16,9 +16,44 @@ const PLATFORM_PACKAGES: Record<string, string> = {
 const require = createRequire(import.meta.url);
 const dir = dirname(fileURLToPath(import.meta.url));
 
+function isMuslFromFilesystem(): boolean | null {
+  try {
+    return readFileSync("/usr/bin/ldd", "utf8").includes("musl");
+  } catch {
+    return null;
+  }
+}
+
+function isMuslFromReport(): boolean | null {
+  if (typeof process.report?.getReport !== "function") {
+    return null;
+  }
+  // excludeNetwork avoids resolving network interfaces in the report; present at
+  // runtime but absent from @types/node 22's ProcessReport.
+  (process.report as { excludeNetwork?: boolean }).excludeNetwork = true;
+  const report = process.report.getReport() as {
+    header?: { glibcVersionRuntime?: string };
+    sharedObjects?: string[];
+  };
+  if (report.header?.glibcVersionRuntime) {
+    return false;
+  }
+  return Array.isArray(report.sharedObjects)
+    && report.sharedObjects.some((f) => f.includes("libc.musl-") || f.includes("ld-musl-"));
+}
+
+function isMusl(): boolean {
+  if (process.platform !== "linux") {
+    return false;
+  }
+  return isMuslFromFilesystem() ?? isMuslFromReport() ?? false;
+}
+
 function tryNative(): BackendModule | null {
   const key = `${process.platform}-${process.arch}`;
-  const pkg = PLATFORM_PACKAGES[key];
+  const pkg = key === "linux-arm64" && isMusl()
+    ? "@9x/pack7-linux-arm64-musl"
+    : PLATFORM_PACKAGES[key];
   let addon: any;
   if (pkg) {
     try { addon = require(pkg); } catch {}
@@ -56,24 +91,64 @@ function tryNative(): BackendModule | null {
     );
   }
 
+  function nativePackIntoSafe(
+    src: Uint8Array, srcOffset: number, srcLength: number,
+    dst: Uint8Array, dstOffset: number,
+  ): number | undefined {
+    return addon.packIntoSafe(
+      Buffer.from(src.buffer, src.byteOffset, src.byteLength),
+      srcOffset, srcLength,
+      Buffer.from(dst.buffer, dst.byteOffset, dst.byteLength),
+      dstOffset,
+    ) ?? undefined;
+  }
+
+  function nativeUnpackIntoSafe(
+    src: Uint8Array, srcOffset: number,
+    dst: Uint8Array, dstOffset: number,
+    originalLength: number,
+  ): number | undefined {
+    return addon.unpackIntoSafe(
+      Buffer.from(src.buffer, src.byteOffset, src.byteLength),
+      srcOffset,
+      Buffer.from(dst.buffer, dst.byteOffset, dst.byteLength),
+      dstOffset,
+      originalLength,
+    ) ?? undefined;
+  }
+
   return {
     backendName: "native",
     packedSize: addon.packedSize,
+    validateAscii: jsFallback.validateAscii,
     pack7(input) {
       const outLen = addon.packedSize(input.length);
       const output = Buffer.allocUnsafe(outLen);
       nativePackInto(input, 0, input.length, output, 0);
       return output;
     },
+    pack7Safe(input) {
+      return addon.pack7Safe(Buffer.from(input.buffer, input.byteOffset, input.byteLength)) ?? undefined;
+    },
     unpack7(input, originalLength) {
       const output = Buffer.allocUnsafe(originalLength);
       nativeUnpackInto(input, 0, output, 0, originalLength);
       return output;
     },
+    unpack7Safe(input, originalLength) {
+      return addon.unpack7Safe(
+        Buffer.from(input.buffer, input.byteOffset, input.byteLength),
+        originalLength,
+      ) ?? undefined;
+    },
     packInto: nativePackInto,
+    packIntoSafe: nativePackIntoSafe,
     unpackInto: nativeUnpackInto,
-    // SAB delegates to JS to avoid Rust aliasing UB when src and dst
-    // are views into the same SharedArrayBuffer backing store.
+    unpackIntoSafe: nativeUnpackIntoSafe,
+    // SAB delegates to JS: the trusted native packInto has no overlap
+    // handling, and Buffer.from(SharedArrayBuffer, ...) is not portable
+    // across all supported Node versions. JS handles same-store overlap
+    // by copying.
     packSAB: jsFallback.packSAB,
     unpackSAB: jsFallback.unpackSAB,
     createPacker(maxSize: number): Packer {
@@ -84,9 +159,15 @@ function tryNative(): BackendModule | null {
         inputBuffer,
         outputBuffer,
         pack(length) {
+          if (length > maxSize) {
+            throw new RangeError(`length ${length} exceeds packer maxSize ${maxSize}`);
+          }
           return addon.packInto(inputBuffer, 0, length, outputBuffer, 0);
         },
         unpack(packedLength, originalLength) {
+          if (originalLength > maxSize) {
+            throw new RangeError(`originalLength ${originalLength} exceeds packer maxSize ${maxSize}`);
+          }
           const expected = addon.packedSize(originalLength);
           if (packedLength < expected) {
             throw new RangeError(`packed length ${packedLength} too short for ${originalLength} bytes (need ${expected})`);
@@ -101,9 +182,17 @@ function tryNative(): BackendModule | null {
 
 interface WasmExports {
   memory: WebAssembly.Memory;
-  pack7(input_ptr: number, input_len: number, output_ptr: number, output_len: number): number;
+  pack7(input_ptr: number, input_len: number, output_ptr: number): number;
+  pack7_safe(input_ptr: number, input_len: number, output_ptr: number, output_len: number): number;
   packed_size(input_len: number): number;
-  unpack7(input_ptr: number, input_len: number, original_length: number, output_ptr: number, output_len: number): void;
+  unpack7(input_ptr: number, original_length: number, output_ptr: number): void;
+  unpack7_safe(
+    input_ptr: number,
+    input_len: number,
+    original_length: number,
+    output_ptr: number,
+    output_len: number,
+  ): number;
   wasm_alloc(size: number): number;
   wasm_free(ptr: number, size: number): void;
   __wbindgen_externrefs: WebAssembly.Table;
@@ -151,10 +240,15 @@ function tryWasm(): BackendModule | null {
     // Convenience APIs use JS fallback -- crossing the WASM boundary
     // for caller-owned buffers adds alloc+copy overhead that's slower
     // than pure JS. WASM advantage is only through createPacker.
+    validateAscii: jsFallback.validateAscii,
     pack7: jsFallback.pack7,
+    pack7Safe: jsFallback.pack7Safe,
     unpack7: jsFallback.unpack7,
+    unpack7Safe: jsFallback.unpack7Safe,
     packInto: jsFallback.packInto,
+    packIntoSafe: jsFallback.packIntoSafe,
     unpackInto: jsFallback.unpackInto,
+    unpackIntoSafe: jsFallback.unpackIntoSafe,
     packSAB: jsFallback.packSAB,
     unpackSAB: jsFallback.unpackSAB,
     createPacker(maxSize: number): Packer {
@@ -163,34 +257,53 @@ function tryWasm(): BackendModule | null {
       const outPtr = (wasm.wasm_alloc(packedMax)) >>> 0;
       let inputBuffer = new Uint8Array(wasm.memory.buffer, inPtr, maxSize);
       let outputBuffer = new Uint8Array(wasm.memory.buffer, outPtr, packedMax);
+      let freed = false;
       return {
         get inputBuffer() {
+          if (freed) {
+            throw new Error("packer is freed");
+          }
           if (inputBuffer.buffer !== wasm.memory.buffer) {
             inputBuffer = new Uint8Array(wasm.memory.buffer, inPtr, maxSize);
           }
           return inputBuffer;
         },
         get outputBuffer() {
+          if (freed) {
+            throw new Error("packer is freed");
+          }
           if (outputBuffer.buffer !== wasm.memory.buffer) {
             outputBuffer = new Uint8Array(wasm.memory.buffer, outPtr, packedMax);
           }
           return outputBuffer;
         },
         pack(length) {
-          const written = wasm.pack7(inPtr, length, outPtr, packedMax);
-          if (written < 0) {
-            throw new Error("non-ASCII byte in input");
+          if (freed) {
+            throw new Error("packer is freed");
           }
-          return written;
+          if (length > maxSize) {
+            throw new RangeError(`length ${length} exceeds packer maxSize ${maxSize}`);
+          }
+          return (wasm.pack7(inPtr, length, outPtr)) >>> 0;
         },
         unpack(packedLength, originalLength) {
+          if (freed) {
+            throw new Error("packer is freed");
+          }
+          if (originalLength > maxSize) {
+            throw new RangeError(`originalLength ${originalLength} exceeds packer maxSize ${maxSize}`);
+          }
           const expected = (wasm.packed_size(originalLength)) >>> 0;
           if (packedLength < expected) {
             throw new RangeError(`packed length ${packedLength} too short for ${originalLength} bytes (need ${expected})`);
           }
-          wasm.unpack7(outPtr, packedLength, originalLength, inPtr, maxSize);
+          wasm.unpack7(outPtr, originalLength, inPtr);
         },
         free() {
+          if (freed) {
+            return;
+          }
+          freed = true;
           wasm.wasm_free(inPtr, maxSize);
           wasm.wasm_free(outPtr, packedMax);
         },

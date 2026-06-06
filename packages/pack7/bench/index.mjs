@@ -100,7 +100,7 @@ async function loadBackends() {
           const outPtr = w.wasm_alloc(outLen) >>> 0;
           try {
             new Uint8Array(w.memory.buffer, inPtr, input.length).set(input);
-            const written = w.pack7(inPtr, input.length, outPtr, outLen);
+            const written = w.pack7(inPtr, input.length, outPtr) >>> 0;
             return new Uint8Array(new Uint8Array(w.memory.buffer, outPtr, written));
           } finally {
             w.wasm_free(inPtr, input.length);
@@ -112,7 +112,7 @@ async function loadBackends() {
           const outPtr = w.wasm_alloc(origLen) >>> 0;
           try {
             new Uint8Array(w.memory.buffer, inPtr, input.length).set(input);
-            w.unpack7(inPtr, input.length, origLen, outPtr, origLen);
+            w.unpack7(inPtr, origLen, outPtr);
             return new Uint8Array(new Uint8Array(w.memory.buffer, outPtr, origLen));
           } finally {
             w.wasm_free(inPtr, input.length);
@@ -128,12 +128,10 @@ async function loadBackends() {
             get inputBuffer() { return new Uint8Array(w.memory.buffer, inPtr, maxSize); },
             get outputBuffer() { return new Uint8Array(w.memory.buffer, outPtr, packedMax); },
             pack(length) {
-              const ret = w.pack7(inPtr, length, outPtr, packedMax);
-              if (ret < 0) { throw new Error("non-ASCII"); }
-              return ret;
+              return w.pack7(inPtr, length, outPtr) >>> 0;
             },
             unpack(packedLength, originalLength) {
-              w.unpack7(outPtr, packedLength, originalLength, inPtr, maxSize);
+              w.unpack7(outPtr, originalLength, inPtr);
             },
             free() { w.wasm_free(inPtr, maxSize); w.wasm_free(outPtr, packedMax); },
           };

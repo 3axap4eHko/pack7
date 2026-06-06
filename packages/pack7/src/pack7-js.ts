@@ -4,20 +4,44 @@ export function packedSize(inputLen: number): number {
   return Math.ceil(inputLen * 7 / 8);
 }
 
+function isValidRange(length: number, offset: number, rangeLength: number): boolean {
+  return Number.isInteger(offset)
+    && Number.isInteger(rangeLength)
+    && offset >= 0
+    && rangeLength >= 0
+    && offset + rangeLength <= length;
+}
+
+function regionsOverlap(aOff: number, aLen: number, bOff: number, bLen: number): boolean {
+  return aOff < bOff + bLen && bOff < aOff + aLen;
+}
+
+function sameBackingStore(a: Uint8Array, b: Uint8Array): boolean {
+  return a.buffer === b.buffer;
+}
+
+function byteOffset(view: Uint8Array, offset: number): number {
+  return view.byteOffset + offset;
+}
+
+export function validateAscii(src: Uint8Array, srcOffset = 0, srcLength = src.length - srcOffset): boolean {
+  if (!isValidRange(src.length, srcOffset, srcLength)) {
+    return false;
+  }
+  for (let i = 0; i < srcLength; i++) {
+    if (src[srcOffset + i]! > 0x7f) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function packInto(
   src: Uint8Array, srcOffset: number, srcLength: number,
   dst: Uint8Array, dstOffset: number,
 ): number {
-  if (srcOffset + srcLength > src.length) {
-    throw new RangeError(`source range [${srcOffset}..${srcOffset + srcLength}) exceeds length ${src.length}`);
-  }
-  const outLen = packedSize(srcLength);
-  if (dstOffset + outLen > dst.length) {
-    throw new RangeError(`destination range [${dstOffset}..${dstOffset + outLen}) exceeds length ${dst.length}`);
-  }
   const chunks = (srcLength / 8) | 0;
   const remainder = srcLength % 8;
-  const dstDV = new DataView(dst.buffer, dst.byteOffset, dst.byteLength);
 
   for (let i = 0; i < chunks; i++) {
     const si = srcOffset + i * 8;
@@ -31,18 +55,13 @@ export function packInto(
     const c6 = src[si + 6]!;
     const c7 = src[si + 7]!;
 
-    if ((c0 | c1 | c2 | c3 | c4 | c5 | c6 | c7) > 0x7f) {
-      for (let j = 0; j < 8; j++) {
-        if (src[si + j]! > 0x7f) {
-          throw new Error(`non-ASCII byte 0x${src[si + j]!.toString(16)} at position ${si + j - srcOffset}`);
-        }
-      }
-    }
-
     const lo = c0 | (c1 << 7) | (c2 << 14) | (c3 << 21) | ((c4 & 0x0f) << 28);
     const hi = (c4 >> 4) | (c5 << 3) | (c6 << 10) | (c7 << 17);
 
-    dstDV.setUint32(di, lo, true);
+    dst[di] = lo & 0xff;
+    dst[di + 1] = (lo >> 8) & 0xff;
+    dst[di + 2] = (lo >> 16) & 0xff;
+    dst[di + 3] = (lo >> 24) & 0xff;
     dst[di + 4] = hi & 0xff;
     dst[di + 5] = (hi >> 8) & 0xff;
     dst[di + 6] = (hi >> 16) & 0xff;
@@ -55,9 +74,6 @@ export function packInto(
     let bitsInBuf = 0;
     for (let j = 0; j < remainder; j++) {
       const b = src[si + j]!;
-      if (b > 0x7f) {
-        throw new Error(`non-ASCII byte 0x${b.toString(16)} at position ${si + j - srcOffset}`);
-      }
       bitBuf |= b << bitsInBuf;
       bitsInBuf += 7;
       while (bitsInBuf >= 8) {
@@ -74,27 +90,40 @@ export function packInto(
   return packedSize(srcLength);
 }
 
+export function packIntoSafe(
+  src: Uint8Array, srcOffset: number, srcLength: number,
+  dst: Uint8Array, dstOffset: number,
+): number | undefined {
+  if (!isValidRange(src.length, srcOffset, srcLength) || !validateAscii(src, srcOffset, srcLength)) {
+    return undefined;
+  }
+  const outLen = packedSize(srcLength);
+  if (!isValidRange(dst.length, dstOffset, outLen)) {
+    return undefined;
+  }
+  if (
+    sameBackingStore(src, dst)
+    && regionsOverlap(byteOffset(src, srcOffset), srcLength, byteOffset(dst, dstOffset), outLen)
+  ) {
+    const copy = new Uint8Array(src.subarray(srcOffset, srcOffset + srcLength));
+    return packInto(copy, 0, srcLength, dst, dstOffset);
+  }
+  return packInto(src, srcOffset, srcLength, dst, dstOffset);
+}
+
 export function unpackInto(
   src: Uint8Array, srcOffset: number,
   dst: Uint8Array, dstOffset: number,
   originalLength: number,
 ): void {
-  const packedLen = packedSize(originalLength);
-  if (srcOffset + packedLen > src.length) {
-    throw new RangeError(`source range [${srcOffset}..${srcOffset + packedLen}) exceeds length ${src.length}`);
-  }
-  if (dstOffset + originalLength > dst.length) {
-    throw new RangeError(`destination range [${dstOffset}..${dstOffset + originalLength}) exceeds length ${dst.length}`);
-  }
   const fullBlocks = (originalLength / 8) | 0;
   const remainder = originalLength % 8;
-  const srcDV = new DataView(src.buffer, src.byteOffset, src.byteLength);
 
   for (let i = 0; i < fullBlocks; i++) {
     const si = srcOffset + i * 7;
     const di = dstOffset + i * 8;
 
-    const lo = srcDV.getUint32(si, true);
+    const lo = src[si]! | (src[si + 1]! << 8) | (src[si + 2]! << 16) | (src[si + 3]! << 24);
     const hi = src[si + 4]! | (src[si + 5]! << 8) | (src[si + 6]! << 16);
 
     dst[di] = lo & 0x7f;
@@ -124,11 +153,45 @@ export function unpackInto(
   }
 }
 
+export function unpackIntoSafe(
+  src: Uint8Array, srcOffset: number,
+  dst: Uint8Array, dstOffset: number,
+  originalLength: number,
+): number | undefined {
+  if (
+    !Number.isInteger(originalLength)
+    || originalLength < 0
+  ) {
+    return undefined;
+  }
+  const packedLen = packedSize(originalLength);
+  if (!isValidRange(src.length, srcOffset, packedLen) || !isValidRange(dst.length, dstOffset, originalLength)) {
+    return undefined;
+  }
+  if (
+    sameBackingStore(src, dst)
+    && regionsOverlap(byteOffset(src, srcOffset), packedLen, byteOffset(dst, dstOffset), originalLength)
+  ) {
+    const copy = new Uint8Array(src.subarray(srcOffset, srcOffset + packedLen));
+    unpackInto(copy, 0, dst, dstOffset, originalLength);
+    return originalLength;
+  }
+  unpackInto(src, srcOffset, dst, dstOffset, originalLength);
+  return originalLength;
+}
+
 export function pack7(input: Uint8Array | Buffer): Uint8Array {
   const outLen = packedSize(input.length);
   const output = new Uint8Array(outLen);
   packInto(input, 0, input.length, output, 0);
   return output;
+}
+
+export function pack7Safe(input: Uint8Array | Buffer): Uint8Array | undefined {
+  if (!validateAscii(input)) {
+    return undefined;
+  }
+  return pack7(input);
 }
 
 export function unpack7(input: Uint8Array, originalLength: number): Uint8Array {
@@ -137,8 +200,15 @@ export function unpack7(input: Uint8Array, originalLength: number): Uint8Array {
   return output;
 }
 
-function regionsOverlap(aOff: number, aLen: number, bOff: number, bLen: number): boolean {
-  return aOff < bOff + bLen && bOff < aOff + aLen;
+export function unpack7Safe(input: Uint8Array, originalLength: number): Uint8Array | undefined {
+  if (
+    !Number.isInteger(originalLength)
+    || originalLength < 0
+    || !isValidRange(input.length, 0, packedSize(originalLength))
+  ) {
+    return undefined;
+  }
+  return unpack7(input, originalLength);
 }
 
 export function packSAB(
@@ -179,9 +249,15 @@ export function createPacker(maxSize: number) {
     inputBuffer,
     outputBuffer,
     pack(length: number): number {
+      if (length > maxSize) {
+        throw new RangeError(`length ${length} exceeds packer maxSize ${maxSize}`);
+      }
       return packInto(inputBuffer, 0, length, outputBuffer, 0);
     },
     unpack(packedLength: number, originalLength: number): void {
+      if (originalLength > maxSize) {
+        throw new RangeError(`originalLength ${originalLength} exceeds packer maxSize ${maxSize}`);
+      }
       const expected = packedSize(originalLength);
       if (packedLength < expected) {
         throw new RangeError(`packed length ${packedLength} too short for ${originalLength} bytes (need ${expected})`);

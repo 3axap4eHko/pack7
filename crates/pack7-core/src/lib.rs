@@ -1,47 +1,25 @@
-use core::fmt;
-
-#[derive(Debug)]
-pub enum Pack7Error {
-    NonAscii { position: usize, value: u8 },
-}
-
-impl fmt::Display for Pack7Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Pack7Error::NonAscii { position, value } => {
-                write!(f, "non-ASCII byte 0x{value:02x} at position {position}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for Pack7Error {}
-
 pub fn packed_size(input_len: usize) -> usize {
-    (input_len * 7).div_ceil(8)
+    input_len / 8 * 7 + ((input_len % 8) * 7).div_ceil(8)
 }
 
-pub fn validate_ascii(input: &[u8]) -> Result<(), Pack7Error> {
-    for (i, &b) in input.iter().enumerate() {
-        if b > 0x7f {
-            return Err(Pack7Error::NonAscii {
-                position: i,
-                value: b,
-            });
-        }
-    }
-    Ok(())
+pub fn validate_ascii(input: &[u8]) -> bool {
+    input.iter().all(|&b| b <= 0x7f)
 }
 
-pub fn pack7(input: &[u8]) -> Result<Vec<u8>, Pack7Error> {
-    validate_ascii(input)?;
+pub fn pack7(input: &[u8]) -> Vec<u8> {
     let mut output = vec![0u8; packed_size(input.len())];
-    pack7_into(input, &mut output)?;
-    Ok(output)
+    pack7_into(input, &mut output);
+    output
 }
 
-pub fn pack7_into(input: &[u8], output: &mut [u8]) -> Result<usize, Pack7Error> {
-    validate_ascii(input)?;
+pub fn pack7_safe(input: &[u8]) -> Option<Vec<u8>> {
+    if !validate_ascii(input) {
+        return None;
+    }
+    Some(pack7(input))
+}
+
+pub fn pack7_into(input: &[u8], output: &mut [u8]) -> usize {
     let out_len = packed_size(input.len());
     let chunks = input.len() / 8;
     let remainder = input.len() % 8;
@@ -70,7 +48,15 @@ pub fn pack7_into(input: &[u8], output: &mut [u8]) -> Result<usize, Pack7Error> 
         dst[..out_bytes].copy_from_slice(&accum.to_le_bytes()[..out_bytes]);
     }
 
-    Ok(out_len)
+    out_len
+}
+
+pub fn pack7_into_safe(input: &[u8], output: &mut [u8]) -> Option<usize> {
+    let out_len = packed_size(input.len());
+    if output.len() < out_len || !validate_ascii(input) {
+        return None;
+    }
+    Some(pack7_into(input, output))
 }
 
 pub fn unpack7(input: &[u8], original_length: usize) -> Vec<u8> {
@@ -107,6 +93,21 @@ pub fn unpack7_into(input: &[u8], original_length: usize, output: &mut [u8]) {
     }
 }
 
+pub fn unpack7_safe(input: &[u8], original_length: usize) -> Option<Vec<u8>> {
+    if input.len() < packed_size(original_length) {
+        return None;
+    }
+    Some(unpack7(input, original_length))
+}
+
+pub fn unpack7_into_safe(input: &[u8], original_length: usize, output: &mut [u8]) -> Option<usize> {
+    if input.len() < packed_size(original_length) || output.len() < original_length {
+        return None;
+    }
+    unpack7_into(input, original_length, output);
+    Some(original_length)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,7 +124,7 @@ mod tests {
 
     #[test]
     fn roundtrip_empty() {
-        let packed = pack7(b"").unwrap();
+        let packed = pack7(b"");
         assert!(packed.is_empty());
         let unpacked = unpack7(&packed, 0);
         assert!(unpacked.is_empty());
@@ -132,7 +133,7 @@ mod tests {
     #[test]
     fn roundtrip_single_byte() {
         let input = b"A";
-        let packed = pack7(input).unwrap();
+        let packed = pack7(input);
         assert_eq!(packed.len(), 1);
         let unpacked = unpack7(&packed, input.len());
         assert_eq!(&unpacked, input);
@@ -141,7 +142,7 @@ mod tests {
     #[test]
     fn roundtrip_7_bytes() {
         let input = b"abcdefg";
-        let packed = pack7(input).unwrap();
+        let packed = pack7(input);
         assert_eq!(packed.len(), packed_size(7));
         let unpacked = unpack7(&packed, input.len());
         assert_eq!(&unpacked, input);
@@ -150,7 +151,7 @@ mod tests {
     #[test]
     fn roundtrip_8_bytes() {
         let input = b"abcdefgh";
-        let packed = pack7(input).unwrap();
+        let packed = pack7(input);
         assert_eq!(packed.len(), 7);
         let unpacked = unpack7(&packed, input.len());
         assert_eq!(&unpacked, input);
@@ -159,7 +160,7 @@ mod tests {
     #[test]
     fn roundtrip_9_bytes() {
         let input = b"abcdefghi";
-        let packed = pack7(input).unwrap();
+        let packed = pack7(input);
         assert_eq!(packed.len(), packed_size(9));
         let unpacked = unpack7(&packed, input.len());
         assert_eq!(&unpacked, input);
@@ -168,7 +169,7 @@ mod tests {
     #[test]
     fn roundtrip_all_printable_ascii() {
         let input: Vec<u8> = (0x20..=0x7e).collect();
-        let packed = pack7(&input).unwrap();
+        let packed = pack7(&input);
         assert_eq!(packed.len(), packed_size(input.len()));
         let unpacked = unpack7(&packed, input.len());
         assert_eq!(unpacked, input);
@@ -177,7 +178,7 @@ mod tests {
     #[test]
     fn roundtrip_control_chars() {
         let input: Vec<u8> = (0x00..=0x1f).collect();
-        let packed = pack7(&input).unwrap();
+        let packed = pack7(&input);
         let unpacked = unpack7(&packed, input.len());
         assert_eq!(unpacked, input);
     }
@@ -185,40 +186,31 @@ mod tests {
     #[test]
     fn roundtrip_max_valid_byte() {
         let input = vec![0x7f; 100];
-        let packed = pack7(&input).unwrap();
+        let packed = pack7(&input);
         let unpacked = unpack7(&packed, input.len());
         assert_eq!(unpacked, input);
     }
 
     #[test]
-    fn non_ascii_rejected() {
+    fn validate_ascii_rejects_non_ascii() {
         let input = vec![0x80];
-        let err = pack7(&input).unwrap_err();
-        match err {
-            Pack7Error::NonAscii { position, value } => {
-                assert_eq!(position, 0);
-                assert_eq!(value, 0x80);
-            }
-        }
+        assert!(!validate_ascii(&input));
+        assert!(pack7_safe(&input).is_none());
     }
 
     #[test]
-    fn non_ascii_in_middle() {
+    fn raw_pack_accepts_non_ascii_by_contract() {
         let mut input = b"hello".to_vec();
         input[3] = 0xff;
-        let err = pack7(&input).unwrap_err();
-        match err {
-            Pack7Error::NonAscii { position, value } => {
-                assert_eq!(position, 3);
-                assert_eq!(value, 0xff);
-            }
-        }
+        let packed = pack7(&input);
+        assert_eq!(packed.len(), packed_size(input.len()));
+        assert!(pack7_safe(&input).is_none());
     }
 
     #[test]
     fn roundtrip_large() {
         let input: Vec<u8> = (0..10000).map(|i| (i % 95 + 0x20) as u8).collect();
-        let packed = pack7(&input).unwrap();
+        let packed = pack7(&input);
         assert_eq!(packed.len(), packed_size(input.len()));
         let unpacked = unpack7(&packed, input.len());
         assert_eq!(unpacked, input);
@@ -228,8 +220,8 @@ mod tests {
     fn output_length_formula() {
         for n in 0..=100 {
             let input: Vec<u8> = vec![0x41; n];
-            let packed = pack7(&input).unwrap();
-            let expected = (n * 7).div_ceil(8);
+            let packed = pack7(&input);
+            let expected = packed_size(n);
             assert_eq!(
                 packed.len(),
                 expected,

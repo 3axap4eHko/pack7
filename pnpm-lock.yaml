@@ -9,22 +9,22 @@ importers:
   .:
     devDependencies:
       '@napi-rs/cli':
-        specifier: ^3
+        specifier: 3.6.0
         version: 3.6.0(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@types/node@22.19.17)
       oxlint:
-        specifier: ^1.58.0
+        specifier: 1.58.0
         version: 1.58.0
 
   packages/pack7:
     devDependencies:
       '@napi-rs/cli':
-        specifier: ^3
+        specifier: 3.6.0
         version: 3.6.0(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@types/node@22.19.17)
       '@types/node':
-        specifier: ^22.0.0
+        specifier: 22.19.17
         version: 22.19.17
       typescript:
-        specifier: ^5.7.0
+        specifier: 5.9.3
         version: 5.9.3
 
 packages:

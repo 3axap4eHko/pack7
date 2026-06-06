@@ -34,6 +34,20 @@ const packed = pack7(Buffer.from('8=FIX.4.4\x019=148\x0135=D'));
 const original = unpack7(packed, 23);
 ```
 
+`pack7` / `unpack7` / `packInto` / `unpackInto` are **trusted** fast paths: no input validation, no overlap detection, no bounds checks. Caller must ensure input is 7-bit ASCII (0x00–0x7F), offsets/lengths are in range, and source/destination ranges do not overlap. Violating the contract yields wrong output (JS) or undefined behavior (native/WASM).
+
+For untrusted input use the `Safe` variants — they return `undefined` instead of throwing, validate ASCII and ranges, and transparently handle same-buffer overlap by copying:
+
+```ts
+import { pack7Safe, unpack7Safe, packIntoSafe, unpackIntoSafe, validateAscii } from '@9x/pack7';
+
+const packed = pack7Safe(buf);                 // undefined if buf has byte >= 0x80
+const original = unpack7Safe(packed, 23);      // undefined if packed is too short
+const n = packIntoSafe(src, 0, len, dst, 0);   // undefined on bad range / non-ASCII
+const m = unpackIntoSafe(src, 0, dst, 0, len); // undefined on bad range
+validateAscii(buf);                            // boolean, no allocation
+```
+
 ### Zero-alloc: `packInto` / `unpackInto`
 
 Caller provides the buffers. No allocation in the hot path.
@@ -135,7 +149,7 @@ node --expose-gc packages/pack7/bench/index.mjs  # includes GC pressure test
 **No:**
 - Data inside JSON strings — output is binary (0x00–0xFF), not text-safe
 - Large payloads where latency budget allows it — gzip saves 80%+, pack7 saves 12.5%
-- Non-ASCII data — input must be 0x00–0x7F, throws on anything above
+- Non-ASCII data — input must be 0x00–0x7F. The trusted path silently produces wrong output; use `pack7Safe` / `validateAscii` to reject up front
 
 ## Backend selection
 
